@@ -127,11 +127,11 @@ spaceMonadsInit ui = do
                   , (APlayer, "player.png")
                   ]
     assets <- mapM loadTextureFile assetFiles
-    shader <- loadShaderProgramWith [ (VertexShader, ".."</>"shader"</>"simple.vert")
-                                    , (FragmentShader,".."</>"shader"</>"simple.frag")]
+    shader <- loadShaderProgramWith [ (VertexShader, "res"</>"shader"</>"simple.vert")
+                                    , (FragmentShader,"res"</>"shader"</>"simple.frag")]
                                     (const (return ()))
-    postProcessingShader <- loadShaderProgramWith [ (VertexShader, ".."</>"shader"</>"post.vert")
-                                    , (FragmentShader,".."</>"shader"</>"post.frag")]
+    postProcessingShader <- loadShaderProgramWith [ (VertexShader, "res"</>"shader"</>"post.vert")
+                                    , (FragmentShader,"res"</>"shader"</>"post.frag")]
                                     (const (return ()))
     setUniforms shader (texSampler =: 0)
     setUniforms postProcessingShader (texSampler =: 0)

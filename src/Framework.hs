@@ -94,7 +94,7 @@ loadTextures = fmap (either error id . sequence) . mapM aux
 
 loadTextureFile :: FilePath -> IO TextureObject
 loadTextureFile f = do 
-    img <- readTexture (".." </> "res" </> f)
+    img <- readTexture ("res"</>"gfx"</> f)
     texFilter
     return $ either error id img
   where
