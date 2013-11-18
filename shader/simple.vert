@@ -1,4 +1,4 @@
-#version 150
+#version 130
 uniform mat3 cam;
 in vec2 vertexCoord;
 in vec2 texCoord;

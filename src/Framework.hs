@@ -45,10 +45,10 @@ setupGLFW :: String -> Int -> Int -> IO (IO UI)
 setupGLFW title w h = do
   GLFW.initialize
   -- general OpenGL settings
-  GLFW.openWindowHint FSAASamples 4
-  GLFW.openWindowHint OpenGLVersionMajor 3
-  GLFW.openWindowHint OpenGLVersionMinor 3
-  GLFW.openWindowHint OpenGLProfile OpenGLCoreProfile
+  --GLFW.openWindowHint FSAASamples 4
+  --GLFW.openWindowHint OpenGLVersionMajor 3
+  --GLFW.openWindowHint OpenGLVersionMinor 3
+  --GLFW.openWindowHint OpenGLProfile OpenGLCoreProfile
   -- create window
   GLFW.openWindow (Size (fromIntegral w) (fromIntegral h)) [DisplayRGBBits 8 8 8] Window
   GLFW.windowTitle $= title
