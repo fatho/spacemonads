@@ -7,6 +7,7 @@ module Types
   , Swarm (..)
   , invaders
   , Bullet (..)
+  , BulletOwner (..)
   , AABB (..)
   , topLeft, bottomRight
   , getAABB
@@ -16,6 +17,8 @@ module Types
   , HasPosition (..)
   , HasSize (..)
   , HasBoundingBox (..)
+  , aabbCollide
+  , objectCollide
   ) where
 
 import Control.Lens
@@ -42,12 +45,19 @@ data Swarm   = Swarm
                 } deriving (Show)
 data Bullet  = Bullet 
                 { _bulletPos :: V2D
+                , _bulletOwner :: BulletOwner
                 } deriving (Show)
+data BulletOwner = PlayerBullet 
+                 | AlienBullet deriving (Show)
 
 data AABB = AABB { _topLeft :: V2D, _bottomRight :: V2D } | AABBNothing deriving (Show, Eq)
 
 data Scene = TitleScene | PauseScene 
-           | GameScene { _playerShip :: Ship }
+           | GameScene 
+              { _playerShip :: Ship 
+              , _bullets :: [Bullet]
+              , _swarm :: Swarm
+              }
 
 makeLenses ''Ship
 makeLenses ''Invader
@@ -105,6 +115,20 @@ translateAABB :: V2D -> AABB -> AABB
 translateAABB v AABBNothing  = AABBNothing
 translateAABB v (AABB v1 v2) = AABB (v ^+^ v1) (v ^+^ v2)
 
+
+aabbCollide :: AABB -> AABB -> Bool
+aabbCollide (AABB p1 s1) (AABB p2 s2) = delta ^. _x < size ^. _x && delta ^. _y < size ^. _y where
+  delta = fmap abs $ c1 ^-^ c2
+  size  = hs1 ^+^ hs2
+  hs1 = s1 ^/ 2
+  hs2 = s2 ^/ 2
+  c1  = p1 ^+^ hs1
+  c2  = p2 ^+^ hs2
+
+objectCollide :: (HasBoundingBox a, HasBoundingBox b) => a -> b -> Bool
+objectCollide x y = aabbCollide (x ^. aabb) (y ^. aabb)
+
+
 instance HasBoundingBox Ship where
   aabb = getAABB
 instance HasBoundingBox Invader where
@@ -114,5 +138,8 @@ instance HasBoundingBox Swarm where
     case swarm ^. invaders ^. to (map (^. aabb)) of
       [] -> mempty 
       as -> foldl1 union as
-
+instance HasBoundingBox Bullet where
+  aabb = to $ \(Bullet pos _) -> AABB pos 0
+instance HasBoundingBox AABB where
+  aabb = id
 

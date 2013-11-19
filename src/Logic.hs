@@ -101,26 +101,42 @@ gameWire = (go 1 0 &&& events) >>> merge where
 
 levelWire :: (Monad m, MonadFix m) => Int -> Int -> WireL m UI Scene
 levelWire stage score = proc ui -> do
-  rec
-    remainingBullets <- stepWires . (pure () &&& delay []) -< activeBullets
-
-    (newShip, newBullets) <- player -< ui
-
-    let activeBullets = newBullets ++ map snd remainingBullets
-
-  returnA -< GameScene newShip
+    rec
+      remainingBullets <- stepWires . (pure () &&& delay []) -< activeBullets
 
 
-player :: Monad m => WireL m UI (Ship, [WireL m () Bullet])
-player = proc ui -> do
-    let (V2 w h) = ui ^. windowSize
+      let currentBullets = map fst remainingBullets
+      (newShip, newBullets) <- player -< (ui, currentBullets)
 
-    x <- integralWith clamp 400 . (input &&& id) -< ui
-    let newShip = Ship (V2 x (fromIntegral h - playerShipSize ^. _y / 2 - 4)) playerShipSize
+      let activeBullets = newBullets ++ map snd remainingBullets
+    case newShip of
+      Just  ship -> returnA -< GameScene ship currentBullets initialSwarm
+      Nothing    -> inhibit (LevelOver Died 0) -< ()
+  where
+    initialSwarm = Swarm (V2 50 50) 
+      [Invader (toEnum j) 
+               (V2 (fromIntegral i * 64 + 32) 
+                   (fromIntegral j * 32 + 32))
+        | i <- [0..9], j <- [0..5]]
+
+
+player :: Monad m => WireL m (UI, [Bullet]) (Maybe Ship, [WireL m () Bullet])
+player = proc (ui, otherBullets) -> do
+    newShip <- fly -< ui
+
+    -- collision detection
+    let
+      shipAABB = newShip ^. aabb
+      isAlienBullet (Bullet _ own) = case own of
+        AlienBullet -> True
+        PlayerBullet -> False
+      died = or $ map (objectCollide shipAABB) (filter isAlienBullet otherBullets)
 
     newBullets <- fire -< (ui, newShip)
 
-    returnA -< (newShip, newBullets)
+    if died
+      then returnA -< (Nothing, newBullets)
+      else returnA -< (Just newShip, newBullets)
   where
     clamp ui x
         | x < leftBound = leftBound
@@ -133,10 +149,18 @@ player = proc ui -> do
       (-200 . whenKeyDown (SpecialKey LEFT) <|> 0)
       (200 . whenKeyDown (SpecialKey RIGHT) <|> 0)
 
+    fly = proc ui -> do
+      let (V2 w h) = ui ^. windowSize
+      x <- integralWith clamp 400 . (input &&& id) -< ui
+      returnA -< Ship (V2 x (fromIntegral h - playerShipSize ^. _y / 2 - 4)) playerShipSize
+
     fire = 
-      let try = proc (ui, ship) -> do
-                  isShooting -< ui
-                  returnA -< [bullet (ship ^. position) (-200)]
+      let 
+        try = proc (ui, ship) -> do
+          isShooting -< ui
+          let bulletPos = ship ^. position - V2 0 (playerShipSize ^. _y)
+          returnA -< [bullet bulletPos (-200) PlayerBullet]
+
       in try <|> pure []
 
 
@@ -146,8 +170,9 @@ isShooting = (asSoonAs . keyDown (CharKey ' ') &&& id) >>> arr snd >>> (once' --
   cooldown = after 0.1
 
 
-bullet :: (Monad m) => V2 Double -> Double -> WireL m a Bullet
-bullet initialPos vspeed = Bullet <$> for 1.5 . integral initialPos . pure (V2 0 vspeed)
+bullet :: (Monad m) => V2 Double -> Double -> BulletOwner -> WireL m a Bullet
+bullet initialPos vspeed owner = Bullet <$> for 3.0 . integral initialPos . pure (V2 0 vspeed) <*> pure owner
+
 
 -- * EVENT WIRES
 -------------------------------------------------------------------------------

@@ -34,24 +34,43 @@ import Logic
 
 -- * app type
 -------------------------------------------------------------------
-data Asset = EnemiesA | EnemiesB | ATitle | APause | APlayer deriving (Show, Eq, Ord)
+data Asset = EnemiesA | EnemiesB 
+           | ATitle | APause | AGameOver
+           | APlayer | APlayerShot | AAlienShot deriving (Show, Eq, Ord)
 data SpaceMonads = SpaceMonads
-              { _assets      :: Map.Map Asset TextureObject
-              , _shader      :: ShaderProgram
-              , _postProcess :: ShaderProgram
-              , _invadersVAO :: VAO
-              , _shipVAO     :: VAO
+              { _assets       :: Map.Map Asset TextureObject
+              , _shader       :: ShaderProgram
+              , _postProcess  :: ShaderProgram
+              , _invadersGeom :: Geometry
+              , _shipVAO      :: VAO
               , _genericSprite :: VAO
               , _postProcessFBO :: (FramebufferObject, TextureObject)
               , _shaderSeed :: GLfloat
               }
 
+data Geometry = Geometry
+                { _geomVAO :: VAO
+                , _geomVertices :: BufferedVertices [Pos,Tex] 
+                , _geomIndices :: BufferObject 
+                }
+
+createGeometry :: (BufferSource (w VertexRec), BufferSource (v Word32)) 
+              => ShaderProgram -> w VertexRec -> v Word32 -> IO Geometry
+createGeometry shader vertices indices = do
+  verts <- bufferVertices vertices
+  eb <- bufferIndices indices
+  vao <- makeVAO $ do
+    enableVertices' shader verts
+    bindVertices verts
+    bindBuffer ElementArrayBuffer $= Just eb
+  return (Geometry vao verts eb)
 
 -- * OpenGL records
 -------------------------------------------------------------------
 type AppInfo = PlainRec '["cam" ::: M33 GLfloat]
 type Pos = "vertexCoord" ::: V2 GLfloat
 type Tex = "texCoord"    ::: V2 GLfloat
+type VertexRec = PlainRec [Pos,Tex]
 
 type TexSampler = "tex" ::: GLint
 
@@ -89,8 +108,6 @@ invaderCoords swarm = VS.fromList $ concatMap packInvader (swarm ^. invaders) wh
 invaderIndices :: Int -> VS.Vector Word32
 invaderIndices n = VS.fromList $ take (n * 6) $ foldMap (flip map [0,1,2,2,1,3] . (+)) [0,4..]
 
-initialSwarm = Swarm (V2 50 50) [Invader (toEnum j) (V2 (fromIntegral i * 64 + 32) (fromIntegral j * 32 + 32)) | i <- [0..9], j <- [0..5]]
-
 -- * graphic implementation
 -------------------------------------------------------------------
 
@@ -101,6 +118,10 @@ squareVertices (V2 x y) (V2 w h) = VS.fromList $ zipWith (<+>) (map (glPos =:) p
   idx = [0,1,2,2,1,3]
   ps  = map (psr!!) idx
   ts  = map (tsr!!) idx
+
+updateSwarmGeom :: Swarm -> Geometry -> IO ()
+updateSwarmGeom swarm geom = do
+  reloadVertices (_geomVertices geom) (invaderCoords swarm)
 
 runSpaceMonads :: IO UI -> IO ()
 runSpaceMonads updateUIState = 
@@ -125,6 +146,8 @@ spaceMonadsInit ui = do
                   , (ATitle, "title.png")
                   , (APause, "pause.png")
                   , (APlayer, "player.png")
+                  , (APlayerShot, "playershot.png")
+                  , (AAlienShot, "enemyshot")
                   ]
     assets <- mapM loadTextureFile assetFiles
     shader <- loadShaderProgramWith [ (VertexShader, "res"</>"shader"</>"simple.vert")
@@ -138,12 +161,7 @@ spaceMonadsInit ui = do
     shaderSeed <- getRandom
 
     -- create VAO for invaders
-    verts <- bufferVertices $ invaderCoords initialSwarm
-    eb <- bufferIndices (invaderIndices 60)
-    invadersVAO <- makeVAO $ do
-      enableVertices' shader verts
-      bindVertices verts
-      bindBuffer ElementArrayBuffer $= Just eb
+    swamGeom <- createGeometry shader [] (invaderIndices 60)
 
     -- create VAO for sprite
     spriteVerts <- bufferVertices $ squareVertices (V2 0 0) (V2 1 1)
@@ -169,7 +187,7 @@ spaceMonadsInit ui = do
             { _assets = assets
             , _shader = shader
             , _postProcess = postProcessingShader
-            , _invadersVAO = invadersVAO
+            , _invadersGeom = swamGeom
             , _shipVAO     = undefined
             , _genericSprite = spriteVAO
             , _postProcessFBO = (fbo, fboTex)
@@ -178,58 +196,86 @@ spaceMonadsInit ui = do
 
 render :: SpaceMonads -> UI -> Scene -> IO ()
 render SpaceMonads{..} ui scene = do
-  ------------------------------------------------------
-  -- activate framebuffer object for offscreen rendering
-  let (fbo, fboTex) = _postProcessFBO
-  bindFramebuffer Framebuffer $= fbo
-  ------------------------------------------------------
+    ------------------------------------------------------
+    withPostProcessing $ do
+      GL.clear [ColorBuffer]
+      currentProgram $= Just (program _shader)
 
-  GL.clear [ColorBuffer]--, AccumBuffer, StencilBuffer, DepthBuffer]
-  currentProgram $= Just (program _shader)
-  let 
-    V2 w h = ui ^. windowSize ^. to (fmap fromIntegral)
-    camMat = matTranslate (-1) (1) !*! matScale (2 * recip w) (-2 * recip h)
-
-  case scene of
-    TitleScene -> do
-      setUniforms _shader (glCam =: (matTranslate (-1) (1) !*! matScale 2 (-2)))
-      withVAO _genericSprite . withTextures2D [_assets Map.! ATitle] $ drawArrays Triangles 0 6
-    PauseScene -> do
-      setUniforms _shader (glCam =: (matTranslate (-1) (1) !*! matScale 2 (-2)))
-      withVAO _genericSprite . withTextures2D [_assets Map.! APause] $ drawArrays Triangles 0 6
-    GameScene ship -> do  
-      setUniforms _shader (glCam =: camMat)
+      case scene of
+        TitleScene -> do
+          setUniforms _shader (glCam =: (matTranslate (-1) (1) !*! matScale 2 (-2)))
+          withVAO _genericSprite . withTextures2D [_assets Map.! ATitle] $ drawArrays Triangles 0 6
+        PauseScene -> do
+          setUniforms _shader (glCam =: (matTranslate (-1) (1) !*! matScale 2 (-2)))
+          withVAO _genericSprite . withTextures2D [_assets Map.! APause] $ drawArrays Triangles 0 6
+        GameScene ship bullets swarm -> do  
+          renderInvaders swarm
+          renderShip ship
+          mapM_ renderBullet bullets
+    ------------------------------------------------------
+    GLFW.swapBuffers
+    GLFW.sleep 1
+  where
+    ------------------------------------------------------
+    -- CAMERA MATRIX ((0,0), (800,600)) --> ((-1,1), (1,-1))
+    ------------------------------------------------------
+    camera = let V2 w h = ui ^. windowSize ^. to (fmap fromIntegral)
+             in matTranslate (-1) (1) !*! matScale (2 * recip w) (-2 * recip h)
+    ------------------------------------------------------
+    -- RENDER INVADERS
+    ------------------------------------------------------
+    renderInvaders swarm = do
+      setUniforms _shader (glCam =: camera)
       let 
         enemiesA = _assets Map.! EnemiesA
         enemiesB = _assets Map.! EnemiesB
         enemies  = if ceiling (ui ^. currentTime * 2) `mod` 2 == 0 then enemiesA else enemiesB
-      withVAO _invadersVAO . withTextures2D [enemies] $ drawIndexedTris 120
-
+      updateSwarmGeom swarm _invadersGeom
+      print (swarm ^. invaders . to length)
+      withVAO (_geomVAO _invadersGeom) . withTextures2D [enemies] $ drawIndexedTris (2 * swarm ^. invaders . to (fromIntegral . length))
+    ------------------------------------------------------
+    -- RENDER SHIP
+    ------------------------------------------------------
+    renderShip ship = do
       let
         shipMat = matTranslate (ship ^. position . _x . to realToFrac - 26)
                                (ship ^. position . _y . to realToFrac - 16) 
               !*! matScale 52 32
-
-      setUniforms _shader (glCam =: (camMat !*! shipMat))
-
+      setUniforms _shader (glCam =: (camera !*! shipMat))
       withVAO _genericSprite . withTextures2D [_assets Map.! APlayer] $ drawArrays Triangles 0 6
+    ------------------------------------------------------
+    -- RENDER BULLETS
+    ------------------------------------------------------
+    renderBullet (Bullet pos owner) = do
+      let
+        shipMat = matTranslate (pos ^. _x . to realToFrac - 3)
+                               (pos ^. _y . to realToFrac - 6) 
+              !*! matScale 6 12
+        texId = case owner of
+          PlayerBullet -> APlayerShot
+          AlienBullet  -> AAlienShot
+      setUniforms _shader (glCam =: (camera !*! shipMat))
+      withVAO _genericSprite . withTextures2D [_assets Map.! texId] $ drawArrays Triangles 0 6
+    ------------------------------------------------------
+    -- POSTPROCESSING
+    ------------------------------------------------------
+    withPostProcessing action = do
+      -- activate framebuffer object for offscreen rendering
+      let (fbo, fboTex) = _postProcessFBO
+      bindFramebuffer Framebuffer $= fbo
+      -- run action
+      action
+      -- restore framebuffer object
+      bindFramebuffer Framebuffer $= defaultFramebufferObject
+      GL.clear [ColorBuffer]--, AccumBuffer, StencilBuffer, DepthBuffer]
+      -- activate postprocessing shader
+      currentProgram $= Just (program _postProcess)
+      -- render offscreen texture to screen
+      let shaderTime = _shaderSeed * 1000 + ui ^. currentTime ^. to realToFrac
+      setUniforms _postProcess (glCam =: (matTranslate (-1) (-1) !*! matScale 2 2) <+> glTime =: shaderTime)
+      withVAO _genericSprite . withTextures2D [fboTex] $ drawArrays Triangles 0 6
 
 
-  ------------------------------------------------------
-  -- restore framebuffer object
-  ------------------------------------------------------
-  bindFramebuffer Framebuffer $= defaultFramebufferObject
-
-  GL.clear [ColorBuffer]--, AccumBuffer, StencilBuffer, DepthBuffer]
-
-  -- activate postprocessing shader
-  currentProgram $= Just (program _postProcess)
-  let shaderTime = _shaderSeed * 1000 + ui ^. currentTime ^. to realToFrac
-  setUniforms _postProcess (glCam =: (matTranslate (-1) (-1) !*! matScale 2 2) <+> glTime =: shaderTime)
-
-  withVAO _genericSprite . withTextures2D [fboTex] $ drawArrays Triangles 0 6
-
-  GLFW.swapBuffers
 
 spaceMonadExit :: SpaceMonads-> IO ()
 spaceMonadExit app = return ()
