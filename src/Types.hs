@@ -6,6 +6,7 @@ module Types
   , InvaderType (..)
   , Swarm (..)
   , invaders
+  , Bullet (..)
   , AABB (..)
   , topLeft, bottomRight
   , getAABB
@@ -27,13 +28,20 @@ type V2I = V2 Int
 data InvaderType = Inv0 | Inv1 | Inv2 | Inv3 | Inv4 | Inv5
                    deriving (Show, Eq, Ord, Enum, Bounded)
 
-data Ship    = Ship { _shipPos :: V2D, _shipSize :: V2D } deriving (Show)
-data Invader = Invader { _invaderType :: InvaderType
-                       , _invaderPos  :: V2D
-                       } deriving (Show)
+data Ship    = Ship 
+                { _shipPos :: V2D
+                , _shipSize :: V2D
+                } deriving (Show)
+data Invader = Invader 
+                { _invaderType :: InvaderType
+                , _invaderPos  :: V2D
+                } deriving (Show)
 data Swarm   = Swarm 
                 { _swarmTopLeft :: V2D
                 , _invaders :: [Invader]
+                } deriving (Show)
+data Bullet  = Bullet 
+                { _bulletPos :: V2D
                 } deriving (Show)
 
 data AABB = AABB { _topLeft :: V2D, _bottomRight :: V2D } | AABBNothing deriving (Show, Eq)
@@ -44,6 +52,7 @@ data Scene = TitleScene | PauseScene
 makeLenses ''Ship
 makeLenses ''Invader
 makeLenses ''Swarm
+makeLenses ''Bullet
 makeLenses ''AABB
 
 class HasPosition a where
@@ -61,6 +70,8 @@ instance HasPosition Invader where
   position = invaderPos
 instance HasPosition Swarm where
   position = swarmTopLeft
+instance HasPosition Bullet where
+  position = bulletPos
 
 instance HasSize Ship where
   size = shipSize

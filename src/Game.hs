@@ -1,6 +1,6 @@
 {-# LANGUAGE TypeOperators, DataKinds, RecordWildCards #-}
 
-module Game where
+module Game (runSpaceMonads) where
 
 import Control.Applicative
 --import Control.Arrow
