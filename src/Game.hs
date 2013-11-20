@@ -3,6 +3,7 @@
 module Game (runSpaceMonads) where
 
 import Control.Applicative
+import Control.Monad hiding (mapM)
 --import Control.Arrow
 import Control.Lens
 import Control.Monad.Random
@@ -125,18 +126,21 @@ updateSwarmGeom swarm geom = do
 
 runSpaceMonads :: IO UI -> IO ()
 runSpaceMonads updateUIState = 
-    updateUIState >>= spaceMonadsInit >>= go clockSession_ mainWire
+    updateUIState >>= spaceMonadsInit >>= go clockSession_ mainWire (avgFps 60) 0
   where
-    go s w state = do
+    go s w fpsWire i state = do
       ui <- updateUIState
       (t, s') <- stepSession s
       (r, w') <- stepWire w t (Right ui)
-
+      (Right fps, fpsWire') <- stepWire fpsWire t (Right ())
+      if i `mod` 60 == 0
+        then print fps
+        else return ()
       case r of
         Left _       -> return ()
         Right scene -> do
           render state ui scene
-          go s' w' state
+          go s' w' fpsWire' (i+1) state
 
 spaceMonadsInit :: UI -> IO SpaceMonads
 spaceMonadsInit ui = do
@@ -198,6 +202,7 @@ render :: SpaceMonads -> UI -> Scene -> IO ()
 render SpaceMonads{..} ui scene = do
     ------------------------------------------------------
     withPostProcessing $ do
+    --void $ do
       GL.clear [ColorBuffer]
       currentProgram $= Just (program _shader)
 
@@ -214,7 +219,6 @@ render SpaceMonads{..} ui scene = do
           mapM_ renderBullet bullets
     ------------------------------------------------------
     GLFW.swapBuffers
-    GLFW.sleep 1
   where
     ------------------------------------------------------
     -- CAMERA MATRIX ((0,0), (800,600)) --> ((-1,1), (1,-1))
@@ -231,7 +235,6 @@ render SpaceMonads{..} ui scene = do
         enemiesB = _assets Map.! EnemiesB
         enemies  = if ceiling (ui ^. currentTime * 2) `mod` 2 == 0 then enemiesA else enemiesB
       updateSwarmGeom swarm _invadersGeom
-      print (swarm ^. invaders . to length)
       withVAO (_geomVAO _invadersGeom) . withTextures2D [enemies] $ drawIndexedTris (2 * swarm ^. invaders . to (fromIntegral . length))
     ------------------------------------------------------
     -- RENDER SHIP
@@ -251,11 +254,13 @@ render SpaceMonads{..} ui scene = do
         shipMat = matTranslate (pos ^. _x . to realToFrac - 3)
                                (pos ^. _y . to realToFrac - 6) 
               !*! matScale 6 12
-        texId = case owner of
-          PlayerBullet -> APlayerShot
-          AlienBullet  -> AAlienShot
+        tex = case owner of
+          PlayerBullet -> playerBulletTex
+          AlienBullet  -> alienBulletTex
       setUniforms _shader (glCam =: (camera !*! shipMat))
-      withVAO _genericSprite . withTextures2D [_assets Map.! texId] $ drawArrays Triangles 0 6
+      withVAO _genericSprite . withTextures2D [tex] $ drawArrays Triangles 0 6
+    playerBulletTex = _assets Map.! APlayerShot
+    alienBulletTex = _assets Map.! APlayerShot
     ------------------------------------------------------
     -- POSTPROCESSING
     ------------------------------------------------------
