@@ -102,22 +102,27 @@ gameWire = (go 1 0 &&& events) >>> merge where
 levelWire :: (Monad m, MonadFix m) => Int -> Int -> WireL m UI Scene
 levelWire stage score = proc ui -> do
     rec
-      remainingBullets <- stepWires . (pure () &&& delay []) -< activeBullets
+      activeBullets <- stepWires . (pure () &&& delay []) -< nextBullets
+      let bulletEntities = map fst activeBullets
 
+      activeSwarm <- stepSwarm . delay initialSwarm -< nextSwarm
 
-      let currentBullets = map fst remainingBullets
-      (newShip, newBullets) <- player -< (ui, currentBullets)
+      (ship, newBullets) <- player -< (ui, bulletEntities)
+      (nextSwarm, remainingBullets) <- collide -< (activeSwarm, activeBullets)
 
-      let activeBullets = newBullets ++ map snd remainingBullets
-    case newShip of
-      Just  ship -> returnA -< GameScene ship currentBullets initialSwarm
+      let nextBullets = newBullets ++ map snd remainingBullets
+    case ship of
+      Just  ship -> returnA -< GameScene ship bulletEntities nextSwarm
       Nothing    -> inhibit (LevelOver Died 0) -< ()
   where
-    initialSwarm = Swarm (V2 50 50) 
-      [Invader (toEnum j) 
-               (V2 (fromIntegral i * 64 + 32) 
-                   (fromIntegral j * 32 + 32))
+    initialSwarm = Swarm 
+      (V2 50 50) 
+      [Invader (toEnum (2 * (j `div` 2))) 
+               (V2 (fromIntegral i * 64 + 16) 
+                   (fromIntegral j * 32 + 16))
         | i <- [0..9], j <- [0..5]]
+      SwarmRight
+      SwarmA
 
 
 player :: Monad m => WireL m (UI, [Bullet]) (Maybe Ship, [WireL m () Bullet])
@@ -127,9 +132,6 @@ player = proc (ui, otherBullets) -> do
     -- collision detection
     let
       shipAABB = newShip ^. aabb
-      isAlienBullet (Bullet _ own) = case own of
-        AlienBullet -> True
-        PlayerBullet -> False
       died = or $ map (objectCollide shipAABB) (filter isAlienBullet otherBullets)
 
     newBullets <- fire -< (ui, newShip)
@@ -166,12 +168,59 @@ player = proc (ui, otherBullets) -> do
 
 isShooting :: Monad m => WireL m UI UI
 isShooting = (asSoonAs . keyDown (CharKey ' ') &&& id) >>> arr snd >>> (once' --> cooldown >>> isShooting) where
-  cooldown :: Monad m => WireL m a a
-  cooldown = after 0.1
+  cooldown :: Monad m => WireL m UI UI
+  cooldown = (asSoonAs . keyUp (CharKey ' ') . after 0.1 &&& id) >>> arr snd
 
 
 bullet :: (Monad m) => V2 Double -> Double -> BulletOwner -> WireL m a Bullet
 bullet initialPos vspeed owner = Bullet <$> for 3.0 . integral initialPos . pure (V2 0 vspeed) <*> pure owner
+
+
+stepSwarm :: (Monad m) => WireL m Swarm Swarm
+stepSwarm = id . for 0.1 --> once' . step --> stepSwarm where
+  step = proc (Swarm pos invs move anim) -> do
+    let 
+      (V2 x y) = pos
+      (w,h)    = swarmSize invs
+      (delta, next) = case move of
+        SwarmRight
+          | x + w < 800 -> (V2 10 0, SwarmRight)
+          | otherwise        -> (0, SwarmDown 2 SwarmLeft)
+        SwarmLeft   
+          | x - 24 > 0      -> (V2 (-10) 0, SwarmLeft)
+          | otherwise        -> (V2 0 10, SwarmDown 2 SwarmRight)
+        SwarmDown 0 n -> (V2 (sgn' n * 10) 0, n)
+        SwarmDown i n -> (V2 0 10, SwarmDown (i-1) n)
+      sgn' SwarmLeft = -1
+      sgn' _         = 1
+
+    returnA -< Swarm (pos ^+^ delta) invs next (animate anim)
+  animate SwarmA = SwarmB
+  animate SwarmB = SwarmA
+  swarmSize invs = (maxXInv + 48, maxYInv + 32) where
+    maxXInv = maximum $ map (^. position . _x) invs
+    maxYInv = maximum $ map (^. position . _y) invs
+
+    
+
+collide :: (Monad m, MonadFix m) => WireL m (Swarm, [(Bullet, WireL m a Bullet)]) (Swarm, [(Bullet, WireL m a Bullet)])
+collide = id {-proc (swarm, bullets) -> do
+      let 
+        playerBullets = filter (not . isAlienBullet) bullets
+        invOff = swarm ^. position
+
+      returnA -< swarm { _invaders = newInvs }
+  where
+    collideAll :: [Bullet] -> [Invaders] -> ([Bullet], [Invaders])
+    collideAll [] 
+    collideAll (b:bs) invs =
+
+    collide1 :: Bullet -> [Invaders] -> ([Bullet],[Invaders])
+    collide1 b [] = ([b], [])
+    collide1 b (i:is) 
+      | aabbContains (invOff ^+^ i ^. aabb) (b ^. position)
+                  = ([], is)
+      | otherwise = let (bs, is') = collide1 in (bs, i:is')-}
 
 
 -- * EVENT WIRES

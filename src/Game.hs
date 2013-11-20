@@ -229,11 +229,16 @@ render SpaceMonads{..} ui scene = do
     -- RENDER INVADERS
     ------------------------------------------------------
     renderInvaders swarm = do
-      setUniforms _shader (glCam =: camera)
+      let
+        swarmMat = matTranslate (swarm ^. position . _x . to realToFrac)
+                               (swarm ^. position . _y . to realToFrac) 
+      setUniforms _shader (glCam =: (camera !*! swarmMat))
       let 
         enemiesA = _assets Map.! EnemiesA
         enemiesB = _assets Map.! EnemiesB
-        enemies  = if ceiling (ui ^. currentTime * 2) `mod` 2 == 0 then enemiesA else enemiesB
+        enemies  = case swarm ^. swarmAnim of
+          SwarmA -> enemiesA 
+          _      -> enemiesB
       updateSwarmGeom swarm _invadersGeom
       withVAO (_geomVAO _invadersGeom) . withTextures2D [enemies] $ drawIndexedTris (2 * swarm ^. invaders . to (fromIntegral . length))
     ------------------------------------------------------

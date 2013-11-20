@@ -5,12 +5,18 @@ module Types
   , invaderType
   , InvaderType (..)
   , Swarm (..)
+  , SwarmMovement (..)
+  , SwarmAnim (..)
   , invaders
+  , swarmMove
+  , swarmAnim
   , Bullet (..)
   , BulletOwner (..)
+  , isAlienBullet
   , AABB (..)
   , topLeft, bottomRight
   , getAABB
+  , translateAABB
   , Scene (..)
   , V2D
   , V2I
@@ -18,6 +24,7 @@ module Types
   , HasSize (..)
   , HasBoundingBox (..)
   , aabbCollide
+  , aabbContains
   , objectCollide
   ) where
 
@@ -42,7 +49,11 @@ data Invader = Invader
 data Swarm   = Swarm 
                 { _swarmTopLeft :: V2D
                 , _invaders :: [Invader]
+                , _swarmMove :: SwarmMovement
+                , _swarmAnim :: SwarmAnim
                 } deriving (Show)
+data SwarmMovement = SwarmLeft | SwarmRight | SwarmDown Int SwarmMovement deriving (Show)
+data SwarmAnim     = SwarmA | SwarmB deriving (Show)
 data Bullet  = Bullet 
                 { _bulletPos :: V2D
                 , _bulletOwner :: BulletOwner
@@ -64,6 +75,11 @@ makeLenses ''Invader
 makeLenses ''Swarm
 makeLenses ''Bullet
 makeLenses ''AABB
+
+isAlienBullet :: Bullet -> Bool
+isAlienBullet (Bullet _ own) = case own of
+  AlienBullet -> True
+  PlayerBullet -> False
 
 class HasPosition a where
   position :: Lens' a V2D
@@ -125,6 +141,12 @@ aabbCollide (AABB p1 s1) (AABB p2 s2) = delta ^. _x < size ^. _x && delta ^. _y 
   c1  = p1 ^+^ hs1
   c2  = p2 ^+^ hs2
 
+aabbContains :: AABB -> V2D -> Bool
+aabbContains (AABB tl br) p = cx && cy where
+  cx = (p ^. _x) `between` (tl ^. _x, br ^. _x)
+  cy = (p ^. _y) `between` (tl ^. _y, br ^. _y)
+  between x (low, high) = x >= low && x <= high
+
 objectCollide :: (HasBoundingBox a, HasBoundingBox b) => a -> b -> Bool
 objectCollide x y = aabbCollide (x ^. aabb) (y ^. aabb)
 
@@ -139,7 +161,7 @@ instance HasBoundingBox Swarm where
       [] -> mempty 
       as -> foldl1 union as
 instance HasBoundingBox Bullet where
-  aabb = to $ \(Bullet pos _) -> AABB pos 0
+  aabb = to $ \(Bullet pos _) -> AABB pos pos
 instance HasBoundingBox AABB where
   aabb = id
 
