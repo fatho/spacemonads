@@ -100,27 +100,29 @@ void main() {
     vec4 sum = vec4(0);
     int j;
     int i;
+    float bloomFactor = (rand(vec2(time, time)) * bloomRnd + bloom);
 
-    for( i= -6 ;i <= 6; i++)
+    for( i= -4 ;i <= 4; i++)
     {
         for (j = -3; j <= 3; j++)
         {
-            sum += tex2DScan(tex, texCoord + vec2(j, i)*0.001) * (rand(vec2(time, time)) * bloomRnd + bloom);
+            sum += tex2DScan(tex, texCoord + vec2(j, i)*0.0015) * bloomFactor;
         }
     }
-    if (tex2DScan(tex, texCoord).r < 0.3)
+    vec4 curColor = tex2DScan(tex, texCoord);
+    if (curColor.r < 0.3)
     {
-       fragColor = sum*sum*0.012 + tex2DScan(tex, texCoord);
+       fragColor = sum*sum*0.012 + curColor;
     }
     else
     {
-        if (tex2DScan(tex, texCoord).r < 0.5)
+        if (curColor.r < 0.5)
         {
-            fragColor = sum*sum*0.009 + tex2DScan(tex, texCoord);
+            fragColor = sum*sum*0.009 + curColor;
         }
         else
         {
-            fragColor = sum*sum*0.0075 + tex2DScan(tex, texCoord);
+            fragColor = sum*sum*0.0075 + curColor;
         }
     }
   }
