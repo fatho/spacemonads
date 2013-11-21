@@ -105,15 +105,18 @@ levelWire stage score = proc ui -> do
       activeBullets <- stepWires . (pure () &&& delay []) -< nextBullets
       let bulletEntities = map fst activeBullets
 
-      activeSwarm <- stepSwarm . delay initialSwarm -< nextSwarm
+      activeSwarm <- stepSwarm (recip $ fromIntegral stage) . delay initialSwarm -< nextSwarm
 
       (ship, newBullets) <- player -< (ui, bulletEntities)
       (nextSwarm, remainingBullets) <- collide -< (activeSwarm, activeBullets)
 
       let nextBullets = newBullets ++ map snd remainingBullets
     case ship of
-      Just  ship -> returnA -< GameScene ship bulletEntities nextSwarm
       Nothing    -> inhibit (LevelOver Died 0) -< ()
+      Just  ship -> 
+        if null (nextSwarm ^. invaders)
+          then inhibit (LevelOver Cleared 0) -< ()
+          else returnA -< GameScene ship bulletEntities nextSwarm
   where
     initialSwarm = Swarm 
       (V2 50 50) 
@@ -176,8 +179,8 @@ bullet :: (Monad m) => V2 Double -> Double -> BulletOwner -> WireL m a Bullet
 bullet initialPos vspeed owner = Bullet <$> for 3.0 . integral initialPos . pure (V2 0 vspeed) <*> pure owner
 
 
-stepSwarm :: (Monad m) => WireL m Swarm Swarm
-stepSwarm = id . for 0.1 --> once' . step --> stepSwarm where
+stepSwarm :: (Monad m) => Double -> WireL m Swarm Swarm
+stepSwarm t = id . for (realToFrac t) --> once' . step --> stepSwarm t where
   step = proc (Swarm pos invs move anim) -> do
     let 
       (V2 x y) = pos
@@ -204,23 +207,28 @@ stepSwarm = id . for 0.1 --> once' . step --> stepSwarm where
     
 
 collide :: (Monad m, MonadFix m) => WireL m (Swarm, [(Bullet, WireL m a Bullet)]) (Swarm, [(Bullet, WireL m a Bullet)])
-collide = id {-proc (swarm, bullets) -> do
+collide = proc (swarm, bullets) -> do
       let 
-        playerBullets = filter (not . isAlienBullet) bullets
         invOff = swarm ^. position
+        (remainingBullets, newInvs) = collideAll invOff bullets (swarm ^. invaders)
 
-      returnA -< swarm { _invaders = newInvs }
+      returnA -< (swarm { _invaders = newInvs }, remainingBullets )
   where
-    collideAll :: [Bullet] -> [Invaders] -> ([Bullet], [Invaders])
-    collideAll [] 
-    collideAll (b:bs) invs =
+    collideAll :: V2D -> [(Bullet, WireL m a Bullet)] -> [Invader] -> ([(Bullet, WireL m a Bullet)], [Invader])
+    collideAll off []     invs = ([], invs)
+    collideAll off (b:bs) invs = 
+      let
+        (b', invs') = collide1 off b invs
+        (bs', invs'') = collideAll off bs invs'
+      in (b' ++ bs', invs'')
 
-    collide1 :: Bullet -> [Invaders] -> ([Bullet],[Invaders])
-    collide1 b [] = ([b], [])
-    collide1 b (i:is) 
-      | aabbContains (invOff ^+^ i ^. aabb) (b ^. position)
+
+    collide1 :: V2D -> (Bullet, WireL m a Bullet) -> [Invader] -> ([(Bullet, WireL m a Bullet)],[Invader])
+    collide1 invOff b [] = ([b], [])
+    collide1 invOff b (i:is) 
+      | aabbContains (translateAABB invOff (i ^. aabb)) (b ^. to fst . position)
                   = ([], is)
-      | otherwise = let (bs, is') = collide1 in (bs, i:is')-}
+      | otherwise = let (bs, is') = collide1 invOff b is in (bs, i:is')
 
 
 -- * EVENT WIRES
