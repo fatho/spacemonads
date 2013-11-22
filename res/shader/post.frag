@@ -57,9 +57,8 @@ vec2 randomSineDistortion(vec2 texCoord)
     float stime = time * 1.5;
 
     float ty = 1 - (stime - floor(stime));
-    vec2 distortion = vec2(0,0);
 
-    if(rand(vec2(floor(stime), floor(stime))) < 0.1)
+    if(rand(vec2(floor(stime), floor(stime))) < 0.04)
     {
       float w = exp(-pow(texCoord.y - ty,2.0) / (2*pow(0.05,2.0)) );
 
