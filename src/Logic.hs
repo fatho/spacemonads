@@ -135,13 +135,17 @@ player = proc (ui, otherBullets) -> do
     -- collision detection
     let
       shipAABB = newShip ^. aabb
+      playerBulletActive = not . null $ filter (not . isAlienBullet) otherBullets
       died = or $ map (objectCollide shipAABB) (filter isAlienBullet otherBullets)
 
     newBullets <- fire -< (ui, newShip)
 
+    let
+      newBullet' = if playerBulletActive then [] else newBullets
+
     if died
-      then returnA -< (Nothing, newBullets)
-      else returnA -< (Just newShip, newBullets)
+      then returnA -< (Nothing, [])
+      else returnA -< (Just newShip, newBullet')
   where
     clamp ui x
         | x < leftBound = leftBound
@@ -164,7 +168,7 @@ player = proc (ui, otherBullets) -> do
         try = proc (ui, ship) -> do
           isShooting -< ui
           let bulletPos = ship ^. position - V2 0 (playerShipSize ^. _y)
-          returnA -< [bullet bulletPos (-200) PlayerBullet]
+          returnA -< [bullet bulletPos (-300) PlayerBullet]
 
       in try <|> pure []
 
@@ -175,9 +179,12 @@ isShooting = (asSoonAs . keyDown (CharKey ' ') &&& id) >>> arr snd >>> (once' --
   cooldown = (asSoonAs . keyUp (CharKey ' ') . after 0.1 &&& id) >>> arr snd
 
 
-bullet :: (Monad m) => V2 Double -> Double -> BulletOwner -> WireL m a Bullet
-bullet initialPos vspeed owner = Bullet <$> for 3.0 . integral initialPos . pure (V2 0 vspeed) <*> pure owner
-
+bullet :: (Monad m, Monoid e) => V2 Double -> Double -> BulletOwner -> Wire TimeT e m a Bullet
+bullet initialPos vspeed owner = Bullet <$> dieWhenOutside . integral initialPos . pure (V2 0 vspeed) <*> pure owner
+  where
+    dieWhenOutside = mkSFN $ \pos@(V2 x y) ->
+      let isInside = x >= 0 && y >= 0 && x <= 800 && y <= 600
+      in (pos, if isInside then dieWhenOutside else inhibit mempty)
 
 stepSwarm :: (Monad m) => Double -> WireL m Swarm Swarm
 stepSwarm t = id . for (realToFrac t) --> once' . step --> stepSwarm t where
