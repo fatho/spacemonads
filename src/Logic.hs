@@ -11,7 +11,7 @@ import FRP.Netwire
 
 import Control.Lens
 import Control.Lens.TH
-import Control.Monad.Random.Class
+import Control.Monad.Random
 import Control.Monad.Fix
 import Prelude hiding ((.), id, until)
 import Graphics.UI.GLFW as GLFW (Key(..), SpecialKey (..))
@@ -99,18 +99,19 @@ gameWire = (go 1 0 &&& events) >>> merge where
   -- handle navigation keys
   events = fmap (const $ Switch pauseWire) <$> keyPress (SpecialKey ESC)
 
-levelWire :: (Monad m, MonadFix m) => Int -> Int -> WireL m UI Scene
+levelWire :: (MonadRandom m, MonadFix m) => Int -> Int -> WireL m UI Scene
 levelWire stage score = proc ui -> do
     rec
       activeBullets <- stepWires . (pure () &&& delay []) -< nextBullets
       let bulletEntities = map fst activeBullets
 
       activeSwarm <- stepSwarm (recip $ fromIntegral stage) . delay initialSwarm -< nextSwarm
+      newAlienBullets <- alienShots -< activeSwarm
 
       (ship, newBullets) <- player -< (ui, bulletEntities)
       (nextSwarm, remainingBullets) <- collide -< (activeSwarm, activeBullets)
 
-      let nextBullets = newBullets ++ map snd remainingBullets
+      let nextBullets = newBullets ++ newAlienBullets ++ map snd remainingBullets
     case ship of
       Nothing    -> inhibit (LevelOver Died 0) -< ()
       Just  ship -> 
@@ -136,7 +137,7 @@ player = proc (ui, otherBullets) -> do
     let
       shipAABB = newShip ^. aabb
       playerBulletActive = not . null $ filter (not . isAlienBullet) otherBullets
-      died = or $ map (objectCollide shipAABB) (filter isAlienBullet otherBullets)
+      died = or $ map (\b -> aabbContains shipAABB (b ^. position)) (filter isAlienBullet otherBullets)
 
     newBullets <- fire -< (ui, newShip)
 
@@ -211,6 +212,13 @@ stepSwarm t = id . for (realToFrac t) --> once' . step --> stepSwarm t where
     maxXInv = maximum $ map (^. position . _x) invs
     maxYInv = maximum $ map (^. position . _y) invs
 
+alienShots :: (MonadRandom m) => WireL m Swarm [WireL m () Bullet]
+alienShots = spawnBullet . wackelkontaktM 0.01 <|> pure [] where
+  spawnBullet = mkGen_ $ \swarm -> do
+    let invs = swarm ^. invaders
+    i <- getRandomR (0, length invs - 1)
+    let pos = swarm ^. invaders . to (!!i) . position
+    return $ Right [bullet (pos ^+^ (swarm ^. position)) 200 AlienBullet]
     
 
 collide :: (Monad m, MonadFix m) => WireL m (Swarm, [(Bullet, WireL m a Bullet)]) (Swarm, [(Bullet, WireL m a Bullet)])
@@ -233,7 +241,8 @@ collide = proc (swarm, bullets) -> do
     collide1 :: V2D -> (Bullet, WireL m a Bullet) -> [Invader] -> ([(Bullet, WireL m a Bullet)],[Invader])
     collide1 invOff b [] = ([b], [])
     collide1 invOff b (i:is) 
-      | aabbContains (translateAABB invOff (i ^. aabb)) (b ^. to fst . position)
+      | (not $ isAlienBullet $ fst b)
+        && aabbContains (translateAABB invOff (i ^. aabb)) (b ^. to fst . position)
                   = ([], is)
       | otherwise = let (bs, is') = collide1 invOff b is in (bs, i:is')
 
@@ -321,5 +330,10 @@ switchByOnce new w0 =
 untilWith :: (Monoid e, Monad m) => b -> Wire s e m (Event a) b
 untilWith v = (pure v &&& id) >>> until
 
---swarmWire :: (MonadRandom m) => WireG m Swarm Swarm
---swarmWire = 
+wackelkontaktM :: (MonadRandom m, Monoid e)
+               => Double  -- ^ Occurrence probability.
+               -> Wire s e m a a
+wackelkontaktM p =
+    mkGen_ $ \x -> do
+        e <- getRandom
+        return (if (e < p) then Right x else Left mempty)
